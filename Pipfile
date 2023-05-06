@@ -9,6 +9,7 @@ peakutils = "*"
 scipy = "*"
 pandas = "*"
 tqdm = "*"
+black = "*"
 
 [dev-packages]
 black = "*"
