@@ -2,8 +2,6 @@ import math
 from typing import Tuple
 
 import numpy as np
-from numba import njit
-from numpy.lib import stride_tricks
 from scipy.interpolate import interp1d
 
 
@@ -58,7 +56,6 @@ def meanBandPower(
         :,
         bandRange(from_freq, to_freq, bins)[0] : bandRange(from_freq, to_freq, bins)[1],
     ])
-
     return meanPower
 
 
@@ -91,17 +88,18 @@ def baseline(x):
     Returns:
       The baseline.
     """
-
+    #bard
     # Calculate the number of samples.
     nSamples = len(x)
 
     # Fit a linear polynomial to the first and last half of the data.
-    # p = np.polyfit(np.arange(nSamples // 2), x[: nSamples // 2], 1)
-    #  # Return the baseline.
-    # return p[0] * np.arange(nSamples) + p[1]
+    p = np.polyfit(np.arange(nSamples // 2), x[: nSamples // 2], 1)
+     # Return the baseline.
+    return p[0] * np.arange(nSamples) + p[1]
 
-    v = np.linspace(0, 1, len(x))
-    return v * np.linalg.lstsq(v[:, np.newaxis], x, rcond=None)[0]
+    #gpt4
+    # v = np.linspace(0, 1, len(x))
+    # return v * np.linalg.lstsq(v[:, np.newaxis], x, rcond=None)[0]
    
 
 
@@ -203,36 +201,25 @@ def timeRange(seconds, n, stride):
     end = n
 
     # Return the indices of the time range.
-    # return np.arange(max(0, int(start)), end)
-    return (max(0, int(start)), end)
+    return np.arange(max(0, int(start)), end)
+    # return (max(0, int(start)), end)
+    
 
-
-def prctmean(x, lo, hi):
+def prctmean(x: np.ndarray, lo: float, hi: float) -> float:
     """
-    This function calculates the percentile-band mean.
+    Calculate the mean of values within a specified percentile range.
 
     Args:
-      x: A 1D NumPy array of data.
-      lo: The lower percentile.
-      hi: The upper percentile.
+        x (np.ndarray): Input array.
+        lo (float): Lower percentile bound.
+        hi (float): Upper percentile bound.
 
     Returns:
-      The percentile-band mean.
+        float: Mean of values within the specified percentile range.
     """
-
-    # Check that the percentiles are valid.
-    if lo > hi:
-        raise ValueError(
-            "The lower percentile must be less than or equal to the upper percentile."
-        )
-
-    # Calculate the indices of the percentile band.
-    bandIndices = np.arange(lo * len(x) // 100, hi * len(x) // 100, len(x) // 100)
-
-    # Calculate the mean of the percentile band.
-    mean = np.mean(x[bandIndices])
-
-    return mean
+    v = np.percentile(x, [lo, hi])
+    y = np.mean(x[(x >= v[0]) & (x <= v[1])])
+    return y
 
 
 def piecewise(x, xp, yp):
@@ -251,8 +238,11 @@ def piecewise(x, xp, yp):
     # Check that the breakpoints are sorted.
     if not np.all(xp[:-1] <= xp[1:]):
         raise ValueError("The breakpoints must be sorted.")
-    x_bounds = (x >= xp[0]) & (x <= xp[-1])
-    y = interp1d(xp, yp, bounds_error=False)(x[x_bounds])
+    conditions = [x < xp[0], (x >= xp[0]) & (x < xp[1]), x >= xp[1]]
+    functions = [lambda x: yp[0], 
+                 lambda x: ((yp[1] - yp[0]) / (xp[1] - xp[0])) * (x - xp[0]) + yp[0], 
+                 lambda x: yp[1]]
+    return np.piecewise(x, conditions, functions)
     return y
 
 
@@ -279,8 +269,8 @@ def scurve(x, Eo, Emax, x50, xwidth):
     """
 
     # Check that the parameters are valid.
-    if Eo < 0 or Emax < 0 or x50 < 0 or xwidth < 0:
-        raise ValueError("The parameters must be non-negative.")
+    # if Eo < 0 or Emax < 0 or x50 < 0 or xwidth < 0:
+    #     raise ValueError("The parameters must be non-negative.")
 
     # Calculate the value of the S-curve.
     y = Eo + (Emax - Eo) / (1 + np.exp((x - x50) / xwidth))
