@@ -46,16 +46,22 @@ def meanBandPower(
     """
 
     if from_freq > to_freq:
-        raise ValueError("The start of the frequency band must be less than or equal to the end.")
+        raise ValueError(
+            "The start of the frequency band must be less than or equal to the end."
+        )
 
     # Calculate the indices of the frequency band.
     # bandIndices = np.arange(from * bins, to * bins, bins)
 
     # Calculate the mean power in the frequency band.
-    meanPower = np.mean(psd[
-        :,
-        bandRange(from_freq, to_freq, bins)[0] : bandRange(from_freq, to_freq, bins)[1],
-    ])
+    meanPower = np.mean(
+        psd[
+            :,
+            bandRange(from_freq, to_freq, bins)[0] : bandRange(
+                from_freq, to_freq, bins
+            )[1],
+        ]
+    )
     return meanPower
 
 
@@ -88,19 +94,18 @@ def baseline(x):
     Returns:
       The baseline.
     """
-    #bard
+    # bard
     # Calculate the number of samples.
     nSamples = len(x)
 
     # Fit a linear polynomial to the first and last half of the data.
     p = np.polyfit(np.arange(nSamples // 2), x[: nSamples // 2], 1)
-     # Return the baseline.
+    # Return the baseline.
     return p[0] * np.arange(nSamples) + p[1]
 
-    #gpt4
+    # gpt4
     # v = np.linspace(0, 1, len(x))
     # return v * np.linalg.lstsq(v[:, np.newaxis], x, rcond=None)[0]
-   
 
 
 def bound(x, lowerBound, upperBound):
@@ -203,7 +208,7 @@ def timeRange(seconds, n, stride):
     # Return the indices of the time range.
     return np.arange(max(0, int(start)), end)
     # return (max(0, int(start)), end)
-    
+
 
 def prctmean(x: np.ndarray, lo: float, hi: float) -> float:
     """
@@ -238,19 +243,9 @@ def piecewise(x, xp, yp):
     # Check that the breakpoints are sorted.
     if not np.all(xp[:-1] <= xp[1:]):
         raise ValueError("The breakpoints must be sorted.")
-    conditions = [x < xp[0], (x >= xp[0]) & (x < xp[1]), x >= xp[1]]
-    functions = [lambda x: yp[0], 
-                 lambda x: ((yp[1] - yp[0]) / (xp[1] - xp[0])) * (x - xp[0]) + yp[0], 
-                 lambda x: yp[1]]
-    return np.piecewise(x, conditions, functions)
+    x = np.clip(x, xp[0], xp[-1])  # This is equivalent to the 'bound' function
+    y = np.interp(x, xp, yp)
     return y
-
-
-#   # Find the index of the closest breakpoint.
-#   i = np.searchsorted(xp, x)
-
-#   # Return the value of the function at the closest breakpoint.
-#   return yp[i]
 
 
 def scurve(x, Eo, Emax, x50, xwidth):
