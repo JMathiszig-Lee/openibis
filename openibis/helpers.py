@@ -243,6 +243,7 @@ def piecewise(x, xp, yp):
     # Check that the breakpoints are sorted.
     if not np.all(xp[:-1] <= xp[1:]):
         raise ValueError("The breakpoints must be sorted.")
+    
     x = np.clip(x, xp[0], xp[-1])  # This is equivalent to the 'bound' function
     y = np.interp(x, xp, yp)
     return y

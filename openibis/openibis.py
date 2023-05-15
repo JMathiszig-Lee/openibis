@@ -1,25 +1,12 @@
-from typing import Tuple
-
 import numpy as np
 import pandas as pd
-import scipy.signal as sp_signal
 from alive_progress import alive_bar
 from scipy.signal import blackman, butter, convolve, filtfilt
 from scipy.stats import percentileofscore, trim_mean
 
-from .helpers import (
-    bandRange,
-    baseline,
-    bound,
-    isNotBurstSuppressed,
-    meanBandPower,
-    nEpochs,
-    piecewise,
-    prctmean,
-    scurve,
-    segment,
-    timeRange,
-)
+from .helpers import (bandRange, baseline, bound, isNotBurstSuppressed,
+                      meanBandPower, nEpochs, piecewise, prctmean, scurve,
+                      segment, timeRange)
 
 
 def openibis(eeg):
@@ -145,16 +132,7 @@ def logPowerRatios(eeg, Fs, stride, BSRmap):
             # %[#YH.g1nFITIH>cdPg
             # Consider data from the most recent thirty seconds.
             thirtySec = timeRange(30, n, stride)
-            # print(thirtySec)
-            # print(f"psd shape: {psd.shape}")
-            # print(psd[thirtySec,bandRange(39.5, 46.5, 0.5)[0] : bandRange(39.5, 46.5, 0.5)[1]])
-            psd2 = psd[
-                thirtySec,
-                bandRange(39.5, 46.5, 0.5)[0] : bandRange(39.5, 46.5, 0.5)[1],
-            ]
-            # print("psd2")
-            # print(psd2)
-            # print(psd2.shape)
+           
             # Calculate the VhighPowerConc.
             VhighPowerConc = np.sqrt(
                 np.mean(
@@ -187,18 +165,6 @@ def logPowerRatios(eeg, Fs, stride, BSRmap):
             )
             # print(f"whole power = {wholePowerConc}")
 
-            # mid_band_power = prctmean(np.nanmean(10 * np.log10(psd[thirty_sec, :][:, band_range(11, 20, 0.5)]), axis=1), 50, 100)
-            # mid_band_power = prctmean(np.nanmean(10 * np.log10(psd[thirtySec, bandRange(11, 20, 0.5)]), axis=1), 50, 100)
-            band_power = 10 * np.apply_along_axis(
-                np.log10,
-                1,
-                psd[
-                    thirtySec,
-                    bandRange(11, 20, 0.5)[0] : bandRange(11, 20, 0.5)[1],
-                ],
-            )
-            # print(f"band power: {band_power}")
-            # mid_band_power = np.percentile(band_power, [50, 100])
             mid_band_power = prctmean(
                 np.nanmean(
                     10
