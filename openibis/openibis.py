@@ -187,10 +187,12 @@ def logPowerRatios(eeg, Fs, stride, BSRmap):
             )
             # print(f"mean band power = {mean_band_power}")
             components[n, 0] = mean_band_power
+
             # Calculate the component 2.
             components[n, 1] = trim_mean(
                 np.log10(VhighPowerConc / wholePowerConc), 0.25
             )
+
             # Calculate the component 3.
             components[n, 2] = meanBandPower(
                 psd[
@@ -299,7 +301,8 @@ def mixer(components, BSR):
     )
 
     # Convert the BSR to a BSR score using a piecewise linear function.
-    bsrScore = np.piecewise(BSR, [0, 100], [50, 0])
+    bsrScore = piecewise(BSR, [0, 100], [50, 0])
+    print(f"bsr score {bsrScore}")
 
     # Convert component 3 to a weight.
     generalWeight = piecewise(components[:, 2], [0, 5], [0.5, 1]) * (

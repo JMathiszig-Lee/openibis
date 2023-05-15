@@ -18,8 +18,8 @@ print(bandRange(40, 47, 0.5))
 # gpt4suppresion(eeg[:64000], 128, 0.5)
 
 # print(openibis(eeg[:64000]))
-open_bis = openibis(eeg)
+open_bis = openibis(eeg[:64000])
 print(open_bis.shape)
 
 data = pd.DataFrame(open_bis)
-data.to_csv("bis.csv")
+data.to_csv("bis.csv") 

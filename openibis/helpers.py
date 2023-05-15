@@ -244,9 +244,8 @@ def piecewise(x, xp, yp):
     if not np.all(xp[:-1] <= xp[1:]):
         raise ValueError("The breakpoints must be sorted.")
     
-    x = np.clip(x, xp[0], xp[-1])  # This is equivalent to the 'bound' function
-    y = np.interp(x, xp, yp)
-    return y
+    f = interp1d(xp, yp, bounds_error=False, fill_value=(yp[0], yp[-1]))
+    return f(x)
 
 
 def scurve(x, Eo, Emax, x50, xwidth):
