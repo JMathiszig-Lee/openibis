@@ -1,8 +1,10 @@
-import pandas as pd
-import numpy as np
 import asyncio
+
+import numpy as np
+import pandas as pd
+
 from openibis.helpers import number_of_epochs, piecewise
-from openibis.openibis import suppression, log_power_ratios
+from openibis.openibis import log_power_ratios, suppression
 
 df = pd.read_csv("eeg.csv")
 

@@ -9,7 +9,8 @@ peakutils = "*"
 scipy = "*"
 pandas = "*"
 tqdm = "*"
-black = "*"
+alive-progress = "*"
+numba = "*"
 
 [dev-packages]
 black = "*"

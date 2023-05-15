@@ -1,160 +1,315 @@
-from .helpers import (
-    n_epochs,
-    mean_band_power,
-    band_range,
-    baseline,
-    bound,
-    segment,
-    is_not_burst_suppressed,
-    time_range,
-    prctmean,
-    piecewise,
-    s_curve,
-)
-import numpy as np
-import scipy.signal as sp_signal
-import pandas as pd
-from scipy.signal import butter, filtfilt, blackman, convolve
-from scipy.stats import trim_mean, percentileofscore
 from typing import Tuple
 
+import numpy as np
+import pandas as pd
+import scipy.signal as sp_signal
+from alive_progress import alive_bar
+from scipy.signal import blackman, butter, convolve, filtfilt
+from scipy.stats import percentileofscore, trim_mean
 
-def openibis(eeg, Fs=128, stride=0.5):
+from .helpers import (
+    bandRange,
+    baseline,
+    bound,
+    isNotBurstSuppressed,
+    meanBandPower,
+    nEpochs,
+    piecewise,
+    prctmean,
+    scurve,
+    segment,
+    timeRange,
+)
+
+
+def openibis(eeg):
     """
-    Calculates the depth of anesthesia for the given EEG data.
+    This function calculates the depth of anesthesia from an EEG signal.
 
     Args:
-        eeg (np.ndarray): The input EEG data as a column vector (in uV).
+      eeg: A 1D NumPy array of EEG data, in units of uV.
 
     Returns:
-        np.ndarray: Depth of anesthesia scores for each EEG epoch.
+      A 1D NumPy array of depth-of-anesthesia scores.
     """
+
+    # Set the sampling frequency and stride.
+    Fs = 128
+    stride = 0.5
+
+    # Calculate the burst suppression rate (BSR).
     BSRmap, BSR = suppression(eeg, Fs, stride)
-    components = log_power_ratios(eeg, Fs, stride, BSRmap)
-    depth_of_anesthesia = mixer(components, BSR)
-    return depth_of_anesthesia
+
+    # Calculate the other components for the depth-of-anesthesia.
+    components = logPowerRatios(eeg, Fs, stride, BSRmap)
+
+    # Mix the components and BSR together to generate the depth-of-anesthesia scores.
+    depthOfAnesthesia = mixer(components, BSR)
+
+    return depthOfAnesthesia
 
 
-def suppression(
-    eeg: np.ndarray, Fs: int = 128, stride: float = 0.5
-) -> Tuple[np.ndarray, np.ndarray]:
+def suppression(eeg, Fs, stride):
     """
-    Determines whether an EEG segment is burst-suppressed and calculates BSR.
+    This function determines whether an EEG segment is burst-suppressed and calculates BSR.
 
     Args:
-        eeg (np.ndarray): The input EEG data as a column vector (in uV).
-        Fs (int): The EEG sampling frequency (must be 128 Hz).
-        stride (float): The stride value (0.5 seconds).
+      eeg: A 1D NumPy array of EEG data, in units of uV.
+      Fs: The sampling frequency of the EEG data, in Hz.
+      stride: The stride of the EEG data, in seconds.
 
     Returns:
-        Tuple[np.ndarray, np.ndarray]: BSRmap and BSR.
+      A tuple of two NumPy arrays:
+        - The first array is a boolean array indicating whether each epoch is burst-suppressed.
+        - The second array is the burst suppression rate (BSR).
     """
-    N, n_stride = n_epochs(eeg, Fs, stride)
-    BSRmap = np.zeros(N)
-    for n in range(N):
-        x = segment(eeg, n + 6.5, 2, n_stride)
-        BSRmap[n] = np.all(np.abs(x - baseline(x)) <= 5)
-    BSR = (
-        100
-        * pd.Series(BSRmap).rolling(window=int((63 / stride) - 1), min_periods=1).mean()
-    )
+
+    # Calculate the total number of epochs.
+    N, n_stride = nEpochs(eeg, Fs, stride)
+
+    # Allocate space to store a true/false map of whether epochs are burst suppressed.
+    BSRmap = np.zeros(N, dtype=bool)
+
+    # Evaluate over the available epochs.
+    with alive_bar(N, title="Supression Map") as bar:
+        for n in range(N):
+            x = segment(eeg, n + 6, n_stride, stride)
+            BSRmap[n] = np.all(np.abs(x - baseline(x)) <= 5)
+            print(x-baseline(x))
+            bar()
+
+    print(BSRmap)
+    # Calculate the burst suppression rate (BSR).
+    BSR = np.mean(BSRmap) * 100
+
     return BSRmap, BSR
 
 
-def log_power_ratios(eeg, Fs, stride, BSRmap):
-    N, n_stride = n_epochs(eeg, Fs, stride)
+def logPowerRatios(eeg, Fs, stride, BSRmap):
+    """
+    This function calculates a family of components, based on log-power ratios.
+
+    Args:
+      eeg: A 1D NumPy array of EEG data, in units of uV.
+      Fs: The sampling frequency of the EEG data, in Hz.
+      stride: The stride of the EEG data, in seconds.
+      BSRmap: A boolean array indicating whether each epoch is burst-suppressed.
+
+    Returns:
+      A NumPy array of three components.
+    """
+
+    # Calculate the total number of epochs.
+    N, n_stride = nEpochs(eeg, Fs, stride)
+
+    # Create a second order high-pass Butterworth filter at 0.65 Hz.
     B, A = butter(2, 0.65 / (Fs / 2), "high")
-    eeg_hi_pass_filtered = filtfilt(B, A, eeg)
-    psd = np.empty((N, 4 * n_stride // 2)) * np.nan
-    suppression_filter = piecewise(np.arange(0, 63.5, 0.5), [0, 3, 6], [0, 0.25, 1])
-    components = np.empty((N, 3)) * np.nan
 
-    for n in range(N):
-        if is_not_burst_suppressed(BSRmap, n, 4):
-            psd[n, :] = power_spectral_density(
-                segment(eeg_hi_pass_filtered, n + 4, 4, n_stride)
-            )
-            # if sawtooth_detector(segment(eeg, n + 4, 4, n_stride), n_stride):
-            #     psd[n, :] = suppression_filter * psd[n, :]
+    # Filter out very low frequencies from the input EEG.
+    eegHiPassFiltered = filtfilt(B, A, eeg)
 
-    for n in range(N):
-        thirty_sec = time_range(30, n, stride)
-        vhigh_power_conc = np.sqrt(
-            np.mean(
-                psd[thirty_sec, np.newaxis, band_range(39.5, 46.5, 0.5)]
-                * psd[thirty_sec, np.newaxis, band_range(40, 47, 0.5)],
-                axis=2,
+    # Allocate space to store power spectral densities, 0 to 63.5 Hz with 0.5 Hz bins.
+    psd = np.empty((N, 128)) * np.nan
+
+    # Define a suppression filter in the range of 0 - 6 Hz
+    SuppressionFilter = piecewise(np.arange(0, 63.5, 0.5), [0, 3, 6], [0, 0.25, 1])
+
+    # Allocate space to store output signal components, 3 components for each epoch
+    components = np.zeros((N, 3), dtype=float)
+
+    # Evaluate over the available epochs.
+    with alive_bar(N, title="epoch eval") as bar:
+        for n in range(N):
+            n = 900
+            print(BSRmap)
+            if not BSRmap[n]:
+                psd[n, :] = powerSpectralDensity(
+                    segment(eegHiPassFiltered, n + 4, 4, 64), Fs, stride
+                )
+                if sawtoothDetector(eeg[n * stride : (n + 1) * stride], stride):
+                    psd[n, :] = SuppressionFilter * psd[n, :]
+
+            # Consider data from the most recent thirty seconds.
+            thirtySec = timeRange(30, n, stride)
+            print(f"psd shape: {psd.shape}")
+            psd2 = psd[
+                thirtySec[0] : thirtySec[1],
+                bandRange(39.5, 46.5, 0.5)[0] : bandRange(39.5, 46.5, 0.5)[1],
+            ]
+            print(psd2)
+            print(psd2.shape)
+            # Calculate the VhighPowerConc.
+            VhighPowerConc = np.sqrt(
+                np.mean(
+                    psd[
+                        thirtySec[0] : thirtySec[1],
+                        bandRange(39.5, 46.5, 0.5)[0] : bandRange(39.5, 46.5, 0.5)[1],
+                    ]
+                    * psd[
+                        thirtySec[0] : thirtySec[1],
+                        bandRange(40, 47, 0.5)[0] : bandRange(40, 47, 0.5)[1],
+                    ],
+                    1,
+                )
             )
-        )
-        whole_power_conc = np.sqrt(
-            np.mean(
-                psd[thirty_sec, np.newaxis, band_range(0.5, 46.5, 0.5)]
-                * psd[thirty_sec, np.newaxis, band_range(1, 47, 0.5)],
-                axis=2,
+            print(f"v high power = {VhighPowerConc}")
+
+            # Calculate the wholePowerConc.
+            wholePowerConc = np.sqrt(
+                np.mean(
+                    psd[
+                        thirtySec[0] : thirtySec[1],
+                        bandRange(0.5, 46.5, 0.5)[0] : bandRange(0.5, 46.5, 0.5)[1],
+                    ]
+                    * psd[
+                        thirtySec[0] : thirtySec[1],
+                        bandRange(1, 47, 0.5)[0] : bandRange(1, 47, 0.5)[1],
+                    ],
+                    1,
+                )
             )
-        )
-        mid_band_power = prctmean(
-            np.nanmean(10 * np.log10(psd[thirty_sec, band_range(11, 20, 0.5)]), axis=1),
-            50,
-            100,
-        )
-        components[n, 0] = (
-            mean_band_power(psd[thirty_sec, :], 30, 47, 0.5) - mid_band_power
-        )
-        components[n, 1] = trim_mean(
-            10 * np.log10(vhigh_power_conc / whole_power_conc), 0.5
-        )
-        components[n, 2] = (
-            mean_band_power(psd[thirty_sec, :], 0.5, 4, 0.5) - mid_band_power
-        )
+            print(f"whole power = {wholePowerConc}")
+
+            # mid_band_power = prctmean(np.nanmean(10 * np.log10(psd[thirty_sec, :][:, band_range(11, 20, 0.5)]), axis=1), 50, 100)
+            # mid_band_power = prctmean(np.nanmean(10 * np.log10(psd[thirtySec, bandRange(11, 20, 0.5)]), axis=1), 50, 100)
+            band_power = 10 * np.apply_along_axis(
+                np.log10,
+                1,
+                psd[
+                    thirtySec[0] : thirtySec[1],
+                    bandRange(11, 20, 0.5)[0] : bandRange(11, 20, 0.5)[1],
+                ],
+            )
+            mid_band_power = np.percentile(band_power, [50, 100])
+            print(f"mid power = {mid_band_power}")
+
+            # Calculate the component 1.
+            mean_band_power = (
+                meanBandPower(psd[thirtySec[0] : thirtySec[1], :], 30, 47, 0.5)
+                - mid_band_power
+            )
+            print(f"mean band power = {mean_band_power}")
+            components[n, 0] = mean_band_power
+            # Calculate the component 2.
+            components[n, 1] = trim_mean(
+                10 * np.log10(np.divide(VhighPowerConc, wholePowerConc)), 0.5
+            )
+            # components[n, 1] = trim_mean(10 * np.apply_along_axis(np.log10, 1, VhighPowerConc / wholePowerConc))
+
+            # Calculate the component 3.
+            components[n, 2] = meanBandPower(
+                psd[
+                    thirtySec[0] : thirtySec[1],
+                    bandRange(11, 20, 0.5)[0] : bandRange(11, 20, 0.5)[1],
+                ],
+                from_=11,
+                to=20,
+                bins=5,
+            )
+            bar()
 
     return components
 
 
-def power_spectral_density(x):
-    f = np.fft.fft(blackman(len(x)) * (x - baseline(x)))
-    y = 2 * np.abs(f[: len(x) // 2]) ** 2 / (len(x) * np.sum(blackman(len(x)) ** 2))
-    return y
-
-
-def sawtooth_detector(eeg: np.ndarray, n_stride: int) -> bool:
+def powerSpectralDensity(eeg, Fs, stride):
     """
-    Determines if this EEG segment contains a strong sawtooth-shaped K-complex.
+    This function calculates the power spectral density of the input EEG data.
 
     Args:
-        eeg (np.ndarray): EEG data segment.
-        n_stride (int): Number of samples per stride.
+      eeg: A 1D NumPy array of EEG data, in units of uV.
+      Fs: The sampling frequency of the EEG data, in Hz.
+      stride: The stride of the EEG data, in seconds.
 
     Returns:
-        bool: True if strong sawtooth-shaped K-complexes are detected, False otherwise.
+      A 2D NumPy array of power spectral densities, in units of dB.
     """
-    saw = np.concatenate((np.zeros(n_stride - 5), np.arange(1, 6)))
-    saw = (saw - np.mean(saw)) / np.std(saw)
-    r = np.arange(1, len(eeg) - len(saw) + 1)
-    v = np.convolve(eeg, np.ones(len(saw)), mode="valid")
-    m1 = np.convolve(eeg, np.flip(saw), mode="valid") / len(saw)
-    m2 = np.convolve(eeg, saw, mode="valid") / len(saw)
-    m = np.vstack((m1, m2)).T
-    v_broadcasted = np.broadcast_to(v[r - 1].reshape(-1, 1), m.shape)
-    Y = np.max((v_broadcasted > 10) * (m / v_broadcasted), axis=1) > 0.63
 
-    return np.any(Y)
+    # Calculate the total number of epochs.
+    N = len(eeg) // stride
+
+    # Create a hanning window.
+    window = np.hanning(N * stride)
+
+    # Calculate the power spectral densities.
+    psd = np.fft.fft(eeg * window, n=N * stride)
+
+    # Calculate the power spectral densities in dB.
+    psddB = 10 * np.log10(np.abs(psd))
+
+    # Return the power spectral densities.
+    return psddB
+
+
+def sawtoothDetector(eeg, stride):
+    """
+    This function detects sawtooth waves in the input EEG data.
+
+    Args:
+      eeg: A 1D NumPy array of EEG data, in units of uV.
+      stride: The stride of the EEG data, in seconds.
+
+    Returns:
+      A NumPy array of boolean values indicating whether each epoch contains a sawtooth wave.
+    """
+
+    # Calculate the total number of epochs.
+    N = len(eeg) // stride
+
+    # Create a sawtooth wave.
+    sawtooth = np.concatenate([np.zeros(N // 2), np.ones(N // 2)])
+
+    # Calculate the cross-correlation between the EEG data and the sawtooth wave.
+    crossCorrelation = np.correlate(eeg, sawtooth, mode="full")
+
+    # Calculate the maximum cross-correlation.
+    maxCrossCorrelation = np.max(crossCorrelation)
+
+    # Calculate the threshold for detecting sawtooth waves.
+    threshold = 0.1 * maxCrossCorrelation
+
+    # Return a boolean array indicating whether each epoch contains a sawtooth wave.
+    return crossCorrelation > threshold
 
 
 def mixer(components, BSR):
-    sedation_score = s_curve(components[:, 0], 104.4, 49.4, -13.9, 5.29)
-    general_score = piecewise(components[:, 1], [-60.89, -30], [-40, 43.1])
-    general_score = general_score + s_curve(
-        components[:, 1], 61.3, 72.6, -24.0, 3.55
-    ) * (components[:, 1] >= -30)
-    bsr_score = piecewise(BSR, [0, 100], [50, 0])
-    general_weight = piecewise(components[:, 2], [0, 5], [0.5, 1]) * (
-        general_score < sedation_score
+    """
+    This function generates the output depth-of-anesthesia by converting and weighting components, BSRs.
+
+    Args:
+      components: A NumPy array of three components.
+      BSR: The burst suppression rate (BSR).
+
+    Returns:
+      A NumPy array of depth-of-anesthesia scores.
+    """
+
+    # Map component 1 to a sedation score on a logistic S-curve.
+    sedationScore = scurve(components[:, 0], 104.4, 49.4, -13.9, 5.29)
+
+    # Map component 2 to a general score, linear region and S-curved region.
+    generalScore = np.piecewise(components[:, 1], [-60.89, -30], [-40, 43.1])
+    generalScore += scurve(components[:, 1], 61.3, 72.6, -24.0, 3.55) * (
+        components[:, 1] >= -30
     )
-    bsr_weight = piecewise(BSR, [10, 50], [0, 1])
-    x = (sedation_score * (1 - general_weight)) + (general_score * general_weight)
+
+    # Convert the BSR to a BSR score using a piecewise linear function.
+    bsrScore = np.piecewise(BSR, [0, 100], [50, 0])
+
+    # Convert component 3 to a weight.
+    generalWeight = np.piecewise(components[:, 2], [0, 5], [0.5, 1]) * (
+        generalScore < sedationScore
+    )
+
+    # Convert the BSR to a weight.
+    bsrWeight = np.piecewise(BSR, [10, 50], [0, 1])
+
+    # Weight the sedation and general scores together.
+    x = (sedationScore * (1 - generalWeight)) + (generalScore * generalWeight)
+
+    # Compress and weight these with the BSR.
     y = (
-        piecewise(x, [-40, 10, 97, 110], [0, 10, 97, 100]) * (1 - bsr_weight)
-        + bsr_score * bsr_weight
+        np.piecewise(x, [-40, 10, 97, 110], [0, 10, 97, 100]) * (1 - bsrWeight)
+        + bsrScore * bsrWeight
     )
+
     return y
